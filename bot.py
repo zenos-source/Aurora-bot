@@ -1,5 +1,5 @@
 import discord
-from discord import Webhook, AsyncWebhookAdapter
+from discord import Webhook
 import json
 import os
 import aiohttp
@@ -8,10 +8,10 @@ from datetime import datetime
 # ============================================================
 # CONFIG
 # ============================================================
-TOKEN = os.environ.get("DISCORD_TOKEN")  # Only this is environment variable
+TOKEN = os.environ.get("DISCORD_TOKEN")
 
 # ============================================================
-# WEBHOOK URLS FOR EACH TIER (HARDCODED - Replace with your actual webhooks)
+# WEBHOOK URLS FOR EACH TIER
 # ============================================================
 WEBHOOKS = {
     "og": "https://discord.com/api/webhooks/1524937313870680156/T-OLDr7VHEX2tGddOdYrEhBcvgfDsOoU9ujcizXOsIGAbHJaeGeyhVmyc9o-QFxtKDmO",
@@ -27,7 +27,7 @@ WEBHOOKS = {
 }
 
 # ============================================================
-# BRAINROT IMAGE URLS (All 62 confirmed working)
+# BRAINROT IMAGE URLS
 # ============================================================
 BRAINROT_IMAGES = {
     "Skibidi Toilet": "https://static.wikia.nocookie.net/stealabr/images/a/a7/Default_Skibidi_Toilet.png/revision/latest/scale-to-width-down/200?cb=20260528092806",
@@ -121,57 +121,45 @@ TIER_NAMES = {
 }
 
 def get_tier_key(tier_name):
-    """Convert display tier name to internal key"""
     tier_name = tier_name.upper().strip()
-    if tier_name in ["OG"]:
-        return "og"
-    elif tier_name in ["PEAK", "ULTRALIGHT"]:
-        return "peak"
-    elif tier_name in ["HIGH", "HIGHLIGHT"]:
-        return "high"
-    elif tier_name in ["MID", "MIDLIGHT"]:
-        return "mid"
-    elif tier_name in ["FARMER", "FARMER LIGHT"]:
-        return "farmer"
-    elif tier_name in ["LOW", "LOWLIGHT"]:
-        return "low"
-    elif tier_name == "STEAL":
-        return "steal"
-    elif tier_name == "REBIRTH":
-        return "rebirth"
+    if tier_name in ["OG"]: return "og"
+    elif tier_name in ["PEAK", "ULTRALIGHT"]: return "peak"
+    elif tier_name in ["HIGH", "HIGHLIGHT"]: return "high"
+    elif tier_name in ["MID", "MIDLIGHT"]: return "mid"
+    elif tier_name in ["FARMER", "FARMER LIGHT"]: return "farmer"
+    elif tier_name in ["LOW", "LOWLIGHT"]: return "low"
+    elif tier_name == "STEAL": return "steal"
+    elif tier_name == "REBIRTH": return "rebirth"
     return "default"
 
 def get_image_url(name):
     return BRAINROT_IMAGES.get(name, None)
 
 def format_num(n):
-    if n >= 1e12:
-        return f"{n/1e12:.1f}T"
-    if n >= 1e9:
-        return f"{n/1e9:.1f}B"
-    if n >= 1e6:
-        return f"{n/1e6:.1f}M"
-    if n >= 1e3:
-        return f"{n/1e3:.1f}K"
+    if n >= 1e12: return f"{n/1e12:.1f}T"
+    if n >= 1e9: return f"{n/1e9:.1f}B"
+    if n >= 1e6: return f"{n/1e6:.1f}M"
+    if n >= 1e3: return f"{n/1e3:.1f}K"
     return str(n)
 
-def parse_gen(gen_str):
+# ============================================================
+# STATE (Pause/Resume)
+# ============================================================
+PAUSED = False
+STATS_FILE = "stats.json"
+
+def load_stats():
     try:
-        if isinstance(gen_str, (int, float)):
-            return int(gen_str)
-        s = str(gen_str).replace("/s", "").strip()
-        num = float(''.join(c for c in s if c.isdigit() or c == '.'))
-        if 'T' in s or 't' in s:
-            return int(num * 1e12)
-        if 'B' in s or 'b' in s:
-            return int(num * 1e9)
-        if 'M' in s or 'm' in s:
-            return int(num * 1e6)
-        if 'K' in s or 'k' in s:
-            return int(num * 1e3)
-        return int(num)
+        with open(STATS_FILE, "r") as f:
+            return json.load(f)
     except:
-        return 0
+        return {"logCount": 0, "totalGen": 0, "stealCount": 0, "lastBrainrot": "None", "lastTier": "None"}
+
+def save_stats(stats):
+    with open(STATS_FILE, "w") as f:
+        json.dump(stats, f)
+
+stats = load_stats()
 
 # ============================================================
 # DISCORD BOT SETUP
@@ -181,7 +169,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def send_to_webhook(webhook_url, embed):
-    """Send an embed to a webhook"""
     if not webhook_url:
         return
     async with aiohttp.ClientSession() as session:
@@ -191,14 +178,83 @@ async def send_to_webhook(webhook_url, embed):
 @bot.event
 async def on_ready():
     print(f"✅ Aurora Bot online: {bot.user}")
-    print(f"📡 Webhooks configured for: {', '.join([k for k,v in WEBHOOKS.items() if v])}")
+    print(f"📡 Webhooks configured")
+    print(f"⏸ Paused: {PAUSED}")
 
 # ============================================================
-# COMMAND: !send - Send a brainrot log
+# !PAUSE COMMAND - Auto Reply with Embed
+# ============================================================
+@bot.command(name="pause")
+async def pause_logs(ctx):
+    global PAUSED
+    if PAUSED:
+        embed = discord.Embed(
+            title="⏸ Already Paused",
+            description="Logging is already paused.\nUse `!resume` to start logging again.",
+            color=0xF59E0B,
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text=f"Total logs: {stats['logCount']}")
+        await ctx.send(embed=embed)
+        return
+    
+    PAUSED = True
+    
+    embed = discord.Embed(
+        title="⏸ Logging Paused",
+        description="All brainrot logs will now be ignored.\nUse `!resume` to start logging again.",
+        color=0xF59E0B,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="📊 Stats", value=f"Total Logs: {stats['logCount']}\nTotal Gen: ${format_num(stats['totalGen'])}/s", inline=False)
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !RESUME COMMAND - Auto Reply with Embed
+# ============================================================
+@bot.command(name="resume")
+async def resume_logs(ctx):
+    global PAUSED
+    if not PAUSED:
+        embed = discord.Embed(
+            title="▶ Already Active",
+            description="Logging is already active.\nUse `!pause` to pause logging.",
+            color=0x10B981,
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text=f"Total logs: {stats['logCount']}")
+        await ctx.send(embed=embed)
+        return
+    
+    PAUSED = False
+    
+    embed = discord.Embed(
+        title="▶ Logging Resumed",
+        description="Brainrot logs are now active.\nUse `!pause` to pause logging.",
+        color=0x10B981,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="📊 Stats", value=f"Total Logs: {stats['logCount']}\nTotal Gen: ${format_num(stats['totalGen'])}/s", inline=False)
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !SEND COMMAND
 # ============================================================
 @bot.command(name="send")
 async def send_log(ctx, *, json_data=None):
-    """Send a brainrot log - Usage: !send {"name":"Skibidi Toilet","gen":"450M/s","tier":"OG"}"""
+    global PAUSED, stats
+    
+    if PAUSED:
+        embed = discord.Embed(
+            title="⏸ Logging Paused",
+            description="All logs are currently paused.\nUse `!resume` to start logging again.",
+            color=0xF59E0B,
+            timestamp=datetime.now()
+        )
+        await ctx.send(embed=embed)
+        return
     
     if json_data is None:
         await ctx.send("❌ No data provided. Example: `!send {\"name\":\"Skibidi Toilet\",\"gen\":\"450M/s\",\"tier\":\"OG\"}`")
@@ -219,16 +275,23 @@ async def send_log(ctx, *, json_data=None):
     priority = data.get("priority", None)
     rebirth_num = data.get("rebirth", None)
     
-    # Get tier key for webhook routing
+    # Update stats
+    stats["logCount"] += 1
+    stats["lastBrainrot"] = name
+    stats["lastTier"] = tier_display
+    if log_type == "steal":
+        stats["stealCount"] += 1
+    else:
+        stats["totalGen"] += parse_gen(gen)
+    save_stats(stats)
+    
+    # Get tier key and webhook
     tier_key = get_tier_key(tier_display)
     webhook_url = WEBHOOKS.get(tier_key, WEBHOOKS.get("default"))
     
-    # Get image
     image_url = get_image_url(name)
     color = TIER_COLORS.get(tier_key, 0x5865F2)
     tier_name = TIER_NAMES.get(tier_key, tier_display)
-    
-    await ctx.send(f"✅ Sending: **{name}** → {tier_name}")
     
     # Build embed
     embed = discord.Embed(
@@ -257,7 +320,6 @@ async def send_log(ctx, *, json_data=None):
             embed.add_field(name="🎯 Priority", value=priority, inline=True)
         embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
         await send_to_webhook(webhook_url, embed)
-        await ctx.send("✅ Sent!")
         return
     else:
         embed.add_field(name="🧠 Brainrot", value=f"**{name}** — **${gen}/s**", inline=False)
@@ -268,21 +330,95 @@ async def send_log(ctx, *, json_data=None):
     embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
     
     await send_to_webhook(webhook_url, embed)
-    await ctx.send("✅ Sent!")
 
 # ============================================================
-# COMMAND: !test - Test all webhooks
+# !STATUS COMMAND
+# ============================================================
+@bot.command(name="status")
+async def status_cmd(ctx):
+    status = "⏸ Paused" if PAUSED else "▶ Active"
+    embed = discord.Embed(
+        title="📊 Aurora Status",
+        color=0x7C3AED,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="Status", value=status, inline=True)
+    embed.add_field(name="Total Brainrots", value=str(stats["logCount"]), inline=True)
+    embed.add_field(name="Total Generation", value=f"${format_num(stats['totalGen'])}/s", inline=True)
+    embed.add_field(name="Steals Detected", value=str(stats["stealCount"]), inline=True)
+    embed.add_field(name="Last Brainrot", value=f"{stats['lastBrainrot']} ({stats['lastTier']})", inline=True)
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !STATS COMMAND
+# ============================================================
+@bot.command(name="stats")
+async def stats_cmd(ctx):
+    status = "⏸ Paused" if PAUSED else "▶ Active"
+    embed = discord.Embed(
+        title="📈 Aurora Statistics",
+        color=0x7C3AED,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="Brainrots Found", value=str(stats["logCount"]), inline=True)
+    embed.add_field(name="Total Generation", value=f"${format_num(stats['totalGen'])}/s", inline=True)
+    embed.add_field(name="Steals Detected", value=str(stats["stealCount"]), inline=True)
+    embed.add_field(name="Last Found", value=stats["lastBrainrot"], inline=True)
+    embed.add_field(name="Tier", value=stats["lastTier"], inline=True)
+    embed.add_field(name="Status", value=status, inline=True)
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !CLEARLOGS COMMAND
+# ============================================================
+@bot.command(name="clearlogs")
+async def clear_logs(ctx):
+    global stats
+    stats["logCount"] = 0
+    stats["totalGen"] = 0
+    stats["stealCount"] = 0
+    stats["lastBrainrot"] = "None"
+    stats["lastTier"] = "None"
+    save_stats(stats)
+    embed = discord.Embed(
+        title="🗑 Logs Cleared",
+        description="All statistics have been reset.",
+        color=0xEF4444,
+        timestamp=datetime.now()
+    )
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !RESET COMMAND
+# ============================================================
+@bot.command(name="reset")
+async def reset_bot(ctx):
+    global stats, PAUSED
+    stats["logCount"] = 0
+    stats["totalGen"] = 0
+    stats["stealCount"] = 0
+    stats["lastBrainrot"] = "None"
+    stats["lastTier"] = "None"
+    PAUSED = False
+    save_stats(stats)
+    embed = discord.Embed(
+        title="🔄 Aurora Reset",
+        description="Everything has been reset to default.\nLogging is now **active**.",
+        color=0x7C3AED,
+        timestamp=datetime.now()
+    )
+    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await ctx.send(embed=embed)
+
+# ============================================================
+# !TEST COMMAND
 # ============================================================
 @bot.command(name="test")
 async def test_webhooks(ctx):
-    """Test all webhook channels"""
     await ctx.send("📡 Testing all webhook channels...")
-    
-    test_data = {
-        "name": "Skibidi Toilet",
-        "gen": "450M/s",
-        "tier": "OG"
-    }
     
     for tier_key, webhook_url in WEBHOOKS.items():
         if webhook_url and tier_key != "default":
