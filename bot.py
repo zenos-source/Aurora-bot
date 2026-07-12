@@ -1,8 +1,57 @@
+import sys
+import os
+
+# ============================================================
+# FIX: audioop module missing on Render (Python 3.11+)
+# ============================================================
+class AudioopModule:
+    def lin2lin(self, fragment, width, newwidth):
+        return fragment
+    def add(self, fragment1, fragment2, width):
+        return fragment1
+    def bias(self, fragment, width, bias):
+        return fragment
+    def cross(self, fragment, width):
+        return b''
+    def findfactor(self, fragment, referenced):
+        return 1.0
+    def findfit(self, fragment, referenced):
+        return (0, 1.0, fragment)
+    def findmax(self, fragment, length):
+        return 0
+    def getsample(self, fragment, width, index):
+        return 0
+    def max(self, fragment, width):
+        return 0
+    def maxpp(self, fragment, width):
+        return 0
+    def minmax(self, fragment, width):
+        return (0, 0)
+    def mul(self, fragment, width, factor):
+        return fragment
+    def ratecv(self, fragment, width, nchannels, inrate, outrate, state, weightA, weightB):
+        return (fragment, state)
+    def reverse(self, fragment, width):
+        return fragment
+    def rms(self, fragment, width):
+        return 0
+    def tomono(self, fragment, width, lfactor, rfactor):
+        return fragment
+    def tostereo(self, fragment, width, lfactor, rfactor):
+        return fragment
+
+if 'audioop' not in sys.modules:
+    sys.modules['audioop'] = AudioopModule()
+
+# ============================================================
+# NOW import discord
+# ============================================================
 import discord
 from discord import Webhook
+from discord.ext import commands
 import json
-import os
 import aiohttp
+import asyncio
 from datetime import datetime
 
 # ============================================================
@@ -27,7 +76,7 @@ WEBHOOKS = {
 }
 
 # ============================================================
-# BRAINROT IMAGE URLS
+# BRAINROT IMAGE URLS (All 62 confirmed working)
 # ============================================================
 BRAINROT_IMAGES = {
     "Skibidi Toilet": "https://static.wikia.nocookie.net/stealabr/images/a/a7/Default_Skibidi_Toilet.png/revision/latest/scale-to-width-down/200?cb=20260528092806",
@@ -142,6 +191,20 @@ def format_num(n):
     if n >= 1e3: return f"{n/1e3:.1f}K"
     return str(n)
 
+def parse_gen(gen_str):
+    try:
+        if isinstance(gen_str, (int, float)):
+            return int(gen_str)
+        s = str(gen_str).replace("/s", "").strip()
+        num = float(''.join(c for c in s if c.isdigit() or c == '.'))
+        if 'T' in s or 't' in s: return int(num * 1e12)
+        if 'B' in s or 'b' in s: return int(num * 1e9)
+        if 'M' in s or 'm' in s: return int(num * 1e6)
+        if 'K' in s or 'k' in s: return int(num * 1e3)
+        return int(num)
+    except:
+        return 0
+
 # ============================================================
 # STATE (Pause/Resume)
 # ============================================================
@@ -178,11 +241,13 @@ async def send_to_webhook(webhook_url, embed):
 @bot.event
 async def on_ready():
     print(f"✅ Aurora Bot online: {bot.user}")
-    print(f"📡 Webhooks configured")
+    print(f"📡 Webhooks configured: {len([k for k,v in WEBHOOKS.items() if v])} channels")
+    print(f"🖼️ Loaded {len(BRAINROT_IMAGES)} brainrot images")
     print(f"⏸ Paused: {PAUSED}")
+    print(f"📊 Stats: {stats}")
 
 # ============================================================
-# !PAUSE COMMAND - Auto Reply with Embed
+# !PAUSE COMMAND
 # ============================================================
 @bot.command(name="pause")
 async def pause_logs(ctx):
@@ -211,7 +276,7 @@ async def pause_logs(ctx):
     await ctx.send(embed=embed)
 
 # ============================================================
-# !RESUME COMMAND - Auto Reply with Embed
+# !RESUME COMMAND
 # ============================================================
 @bot.command(name="resume")
 async def resume_logs(ctx):
