@@ -1,13 +1,21 @@
+import asyncio
+import sys
 import discord
 from discord.ext import commands
 from discord import app_commands
 import json
 import os
-import asyncio
 from datetime import datetime, timedelta
 import aiohttp
 
-# ─── ENVIRONMENT VARIABLES (Set in Render Dashboard) ──────────────────────
+# ─── CRITICAL FIX FOR RENDER ─────────────────────────────────────────────────
+if sys.platform == 'linux':
+    try:
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+    except:
+        pass
+
+# ─── ENVIRONMENT VARIABLES ──────────────────────────────────────────────────
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
@@ -27,6 +35,7 @@ if not DEEPSEEK_API_KEY:
 print("✅ Environment variables loaded")
 print(f"🔒 Bot token: {'*' * 10} (hidden)")
 print(f"🔒 API key: {'*' * 10} (hidden)")
+print(f"📊 Guild ID: {GUILD_ID}")
 
 # ─── STORAGE ──────────────────────────────────────────────────────────────────
 TICKETS_FILE = "tickets.json"
@@ -63,7 +72,7 @@ prices = {
 }
 
 # ─── AI FUNCTIONS ─────────────────────────────────────────────────────────────
-async def get_ai_response(message, ticket_type=None, history=None):
+async def get_ai_response(message, ticket_type=None):
     """Get response from DeepSeek AI"""
     
     system_prompt = f"""You are an AI support agent for a Discord server called "Source Hub".
@@ -82,14 +91,14 @@ RULES:
 3. If you don't know something, say "I'll escalate this to a human agent"
 4. Keep responses helpful but concise
 5. If they say "human" or "staff", immediately offer to escalate
-6. NEVER mention your API key, token, or any internal credentials
-7. If asked about how you work, say "I'm an AI assistant" - don't give technical details"""
+6. Ask clarifying questions if needed
+7. NEVER mention your API key, token, or any internal credentials
+8. If asked about how you work, say "I'm an AI assistant powered by DeepSeek" - don't give technical details"""
+
+    if ticket_type:
+        system_prompt += f"\n\nThis is a {ticket_type} ticket."
 
     messages = [{"role": "system", "content": system_prompt}]
-    
-    if history:
-        messages.extend(history[-5:])
-    
     messages.append({"role": "user", "content": message})
 
     try:
@@ -112,7 +121,7 @@ RULES:
                 return data["choices"][0]["message"]["content"]
     except Exception as e:
         print(f"AI Error: {e}")
-        return "⚠️ I'm having trouble responding. A human agent will be with you shortly."
+        return "⚠️ I'm having trouble responding right now. A human agent will be with you shortly."
 
 # ─── TICKET MODAL ─────────────────────────────────────────────────────────────
 class TicketModal(discord.ui.Modal):
@@ -440,10 +449,12 @@ async def clear_messages(ctx, amount: int):
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 def is_ticket_channel(channel):
+    """Check if a channel is a ticket"""
     tickets = load_tickets()
     return str(channel.id) in tickets.values()
 
 async def get_transcript(channel):
+    """Generate a transcript of the channel"""
     messages = []
     async for msg in channel.history(limit=200, oldest_first=True):
         timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -468,8 +479,20 @@ async def on_message(message):
             await bot.process_commands(message)
             return
         
+        # Get ticket type from channel topic
+        ticket_type = "General"
+        if message.channel.topic:
+            try:
+                topic_parts = message.channel.topic.split(" | ")
+                for part in topic_parts:
+                    if "Type:" in part:
+                        ticket_type = part.replace("Type: ", "")
+            except:
+                pass
+        
+        # Get AI response
         async with message.channel.typing():
-            response = await get_ai_response(message.content)
+            response = await get_ai_response(message.content, ticket_type=ticket_type)
         
         await message.channel.send(response)
         return
