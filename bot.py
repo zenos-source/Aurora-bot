@@ -7,12 +7,11 @@ import asyncio
 from datetime import datetime, timedelta
 import aiohttp
 
-# ─── ENVIRONMENT VARIABLES (Set in your hosting platform) ──────────────────
+# ─── ENVIRONMENT VARIABLES (Set in Render Dashboard) ──────────────────────
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 
-# Check if variables are set
 if not DISCORD_TOKEN:
     print("❌ DISCORD_TOKEN not set in environment variables!")
     exit(1)
@@ -25,8 +24,7 @@ if not DEEPSEEK_API_KEY:
     print("❌ DEEPSEEK_API_KEY not set in environment variables!")
     exit(1)
 
-# Security: Hide API keys from logs
-print("✅ Environment variables loaded successfully")
+print("✅ Environment variables loaded")
 print(f"🔒 Bot token: {'*' * 10} (hidden)")
 print(f"🔒 API key: {'*' * 10} (hidden)")
 
@@ -65,15 +63,11 @@ prices = {
 }
 
 # ─── AI FUNCTIONS ─────────────────────────────────────────────────────────────
-async def get_ai_response(message, ticket_type=None, payment_method=None, history=None):
-    """Get response from DeepSeek AI - API key hidden from users"""
+async def get_ai_response(message, ticket_type=None, history=None):
+    """Get response from DeepSeek AI"""
     
-    system_prompt = f"""You are an AI support agent for a Discord server called "Source Hub". 
-You handle tickets for:
-1. Buying scripts
-2. Buying source access
-3. Partnerships
-4. General support
+    system_prompt = f"""You are an AI support agent for a Discord server called "Source Hub".
+You handle tickets for buying scripts, source access, partnerships, and general support.
 
 PRICES (use these EXACTLY when asked):
 - Robux: {prices['robux']}
@@ -88,13 +82,8 @@ RULES:
 3. If you don't know something, say "I'll escalate this to a human agent"
 4. Keep responses helpful but concise
 5. If they say "human" or "staff", immediately offer to escalate
-6. Ask clarifying questions if needed
-7. Categorize the issue as: Script Purchase, Source Access, Partnership, or General
-8. NEVER mention your API key, token, or any internal credentials
-9. If asked about how you work, say "I'm an AI assistant powered by DeepSeek" - don't give technical details"""
-
-    if ticket_type:
-        system_prompt += f"\n\nThis is a {ticket_type} ticket."
+6. NEVER mention your API key, token, or any internal credentials
+7. If asked about how you work, say "I'm an AI assistant" - don't give technical details"""
 
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -123,7 +112,7 @@ RULES:
                 return data["choices"][0]["message"]["content"]
     except Exception as e:
         print(f"AI Error: {e}")
-        return "⚠️ I'm having trouble responding right now. A human agent will be with you shortly."
+        return "⚠️ I'm having trouble responding. A human agent will be with you shortly."
 
 # ─── TICKET MODAL ─────────────────────────────────────────────────────────────
 class TicketModal(discord.ui.Modal):
@@ -206,7 +195,7 @@ class TicketModal(discord.ui.Modal):
         else:
             welcome_msg += f"\n\nHow can I help you today?"
 
-        welcome_msg += "\n\nAsk me anything, and I'll do my best to help! If you need a human, just say 'human' or 'staff'."
+        welcome_msg += "\n\nAsk me anything! If you need a human, say 'human' or 'staff'."
 
         embed = discord.Embed(
             title="🎫 Ticket Opened",
@@ -451,12 +440,10 @@ async def clear_messages(ctx, amount: int):
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 def is_ticket_channel(channel):
-    """Check if a channel is a ticket"""
     tickets = load_tickets()
     return str(channel.id) in tickets.values()
 
 async def get_transcript(channel):
-    """Generate a transcript of the channel"""
     messages = []
     async for msg in channel.history(limit=200, oldest_first=True):
         timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -481,13 +468,8 @@ async def on_message(message):
             await bot.process_commands(message)
             return
         
-        # Get AI response
         async with message.channel.typing():
-            response = await get_ai_response(
-                message.content,
-                ticket_type="General",
-                history=[{"role": "user", "content": msg.content} for msg in await message.channel.history(limit=10).flatten() if not msg.author.bot]
-            )
+            response = await get_ai_response(message.content)
         
         await message.channel.send(response)
         return
