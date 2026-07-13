@@ -1,512 +1,563 @@
-import sys
-import os
-
-# ============================================================
-# FIX: audioop module missing on Render (Python 3.11+)
-# ============================================================
-class AudioopModule:
-    def lin2lin(self, fragment, width, newwidth):
-        return fragment
-    def add(self, fragment1, fragment2, width):
-        return fragment1
-    def bias(self, fragment, width, bias):
-        return fragment
-    def cross(self, fragment, width):
-        return b''
-    def findfactor(self, fragment, referenced):
-        return 1.0
-    def findfit(self, fragment, referenced):
-        return (0, 1.0, fragment)
-    def findmax(self, fragment, length):
-        return 0
-    def getsample(self, fragment, width, index):
-        return 0
-    def max(self, fragment, width):
-        return 0
-    def maxpp(self, fragment, width):
-        return 0
-    def minmax(self, fragment, width):
-        return (0, 0)
-    def mul(self, fragment, width, factor):
-        return fragment
-    def ratecv(self, fragment, width, nchannels, inrate, outrate, state, weightA, weightB):
-        return (fragment, state)
-    def reverse(self, fragment, width):
-        return fragment
-    def rms(self, fragment, width):
-        return 0
-    def tomono(self, fragment, width, lfactor, rfactor):
-        return fragment
-    def tostereo(self, fragment, width, lfactor, rfactor):
-        return fragment
-
-if 'audioop' not in sys.modules:
-    sys.modules['audioop'] = AudioopModule()
-
-# ============================================================
-# NOW import discord
-# ============================================================
 import discord
-from discord import Webhook
 from discord.ext import commands
+from discord import app_commands
 import json
-import aiohttp
+import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+import aiohttp
 
-# ============================================================
-# CONFIG
-# ============================================================
-TOKEN = os.environ.get("DISCORD_TOKEN")
+# ─── ENVIRONMENT VARIABLES (Set in your hosting platform) ──────────────────
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = int(os.getenv('GUILD_ID', '0'))
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 
-# ============================================================
-# WEBHOOK URLS FOR EACH TIER
-# ============================================================
-WEBHOOKS = {
-    "og": "https://discord.com/api/webhooks/1524937313870680156/T-OLDr7VHEX2tGddOdYrEhBcvgfDsOoU9ujcizXOsIGAbHJaeGeyhVmyc9o-QFxtKDmO",
-    "peak": "https://discord.com/api/webhooks/1524937630633037864/J5AviqbG51snENQhv_T2zXOqAVO91ZtDDzn7oPRO7HdROAb6WT1xysHzghQaWODfvya8",
-    "ultralight": "https://discord.com/api/webhooks/1524937630633037864/J5AviqbG51snENQhv_T2zXOqAVO91ZtDDzn7oPRO7HdROAb6WT1xysHzghQaWODfvya8",
-    "high": "https://discord.com/api/webhooks/1524937674392080517/6xCMCuTNbOefOOO6ArdsU0eKv19mGnaFUiYfLK0t-ZX2IWnhHIFYaAeZ6RKDtpBOdnAW",
-    "mid": "https://discord.com/api/webhooks/1524937724144914564/Ku_E7hfdP0wc05JgIkSxR7VD35K5IHUAErsZH8fNWWJ2nqYMgHGlgx4jORwhyz-Q6rOt",
-    "farmer": "https://discord.com/api/webhooks/1524937788909158410/LbVEVEADq2Qdoc66Ad4EeoxhlJuET5zAuHyGtB8_uIEAQDGH-z2KuOx8umN8tOykvxaL",
-    "low": "https://discord.com/api/webhooks/1524937724144914564/Ku_E7hfdP0wc05JgIkSxR7VD35K5IHUAErsZH8fNWWJ2nqYMgHGlgx4jORwhyz-Q6rOt",
-    "steal": "https://discord.com/api/webhooks/1525187027040206950/VS9dVJI6QCTOibyZbLBRbYjc70cI5w4FgRtADT09jQP3fIZvsze6FFMujSsSSdMb7izA",
-    "rebirth": "https://discord.com/api/webhooks/1525124198161318018/mg18ITB78EOZb46DLH8qp2hNB8Vcp9HP5FtxvM1HP_GmiXw6_qyP04kRVREEx-vO5ilI",
-    "default": "https://discord.com/api/webhooks/1524937313870680156/T-OLDr7VHEX2tGddOdYrEhBcvgfDsOoU9ujcizXOsIGAbHJaeGeyhVmyc9o-QFxtKDmO"
-}
+# Check if variables are set
+if not DISCORD_TOKEN:
+    print("❌ DISCORD_TOKEN not set in environment variables!")
+    exit(1)
 
-# ============================================================
-# BRAINROT IMAGE URLS (All 62 confirmed working)
-# ============================================================
-BRAINROT_IMAGES = {
-    "Skibidi Toilet": "https://static.wikia.nocookie.net/stealabr/images/a/a7/Default_Skibidi_Toilet.png/revision/latest/scale-to-width-down/200?cb=20260528092806",
-    "Strawberry Elephant": "https://static.wikia.nocookie.net/stealabr/images/5/58/Strawberryelephant.png/revision/latest/scale-to-width-down/192?cb=20260317001745",
-    "John Pork": "https://static.wikia.nocookie.net/stealabr/images/d/d2/John_Pork.png/revision/latest/scale-to-width-down/200?cb=20260502233229",
-    "Meowl": "https://static.wikia.nocookie.net/stealabr/images/b/b8/Clear_background_clear_meowl_image.png/revision/latest/scale-to-width-down/138?cb=20251022133154",
-    "Headless Horseman": "https://static.wikia.nocookie.net/stealabr/images/2/2a/Horseman.webp/revision/latest/scale-to-width-down/186?cb=20260704043035",
-    "Elefanto Frigo": "https://static.wikia.nocookie.net/stealabr/images/4/4b/Elefanto_Frigo.png/revision/latest/scale-to-width-down/200?cb=20260417150142",
-    "Signore Carapace": "https://static.wikia.nocookie.net/stealabr/images/4/4a/Default_Signore_Carapace.png/revision/latest/scale-to-width-down/200?cb=20260417150408",
-    "Dragon Gingerini": "https://static.wikia.nocookie.net/stealabr/images/a/a6/Dragon_Gingerini.png/revision/latest/scale-to-width-down/200?cb=20260528114017",
-    "Arcadragon": "https://static.wikia.nocookie.net/stealabr/images/4/47/Arcadragon_Brainrot.png/revision/latest/scale-to-width-down/200?cb=20260412144930",
-    "Love Love Bear": "https://static.wikia.nocookie.net/stealabr/images/b/bf/Love_Love_Bear.png/revision/latest/scale-to-width-down/200?cb=20260417150552",
-    "Dragon Cannelloni": "https://static.wikia.nocookie.net/stealabr/images/a/a5/Dragon_Cannelloni.png/revision/latest/scale-to-width-down/200?cb=20260428162417",
-    "Dragon Aquanini": "https://static.wikia.nocookie.net/stealabr/images/0/0c/Dragon_aquanini_but_high_graphism.png/revision/latest/scale-to-width-down/200?cb=20260610135509",
-    "La Casa Boo": "https://static.wikia.nocookie.net/stealabr/images/8/8c/La_Casa_Boo.png/revision/latest/scale-to-width-down/195?cb=20260707155348",
-    "Hydra Dragon Cannelloni": "https://static.wikia.nocookie.net/stealabr/images/e/ee/Hydra_Dragon_Cannelloni.png/revision/latest/scale-to-width-down/174?cb=20260207220000",
-    "Griffin": "https://static.wikia.nocookie.net/stealabr/images/f/f8/Griffin.png/revision/latest/scale-to-width-down/200?cb=20260417151951",
-    "Bunny and Eggy": "https://static.wikia.nocookie.net/stealabr/images/6/65/Bunny_and_Eggy.png/revision/latest/scale-to-width-down/200?cb=20260625235918",
-    "Digi Narwhal": "https://static.wikia.nocookie.net/stealabr/images/7/7f/Digi_Narwhal.png/revision/latest/scale-to-width-down/200?cb=20260419152454",
-    "Antonio": "https://static.wikia.nocookie.net/stealabr/images/f/f0/Antonio.png/revision/latest/scale-to-width-down/200?cb=20260327204416",
-    "Jelly Moby": "https://static.wikia.nocookie.net/stealabr/images/a/ad/Jelly_Moby.png/revision/latest/scale-to-width-down/200?cb=20260626000342",
-    "Kalika Bros": "https://static.wikia.nocookie.net/stealabr/images/f/f3/Kalika_Bros.png/revision/latest/scale-to-width-down/200?cb=20260419152541",
-    "Kraken": "https://static.wikia.nocookie.net/stealabr/images/d/d3/Kraken.png/revision/latest/scale-to-width-down/200?cb=20260616235047",
-    "Rico Dinero": "https://static.wikia.nocookie.net/stealabr/images/3/3b/Rico_Dinero.png/revision/latest/scale-to-width-down/200?cb=20260412144551",
-    "Rubrikiko": "https://static.wikia.nocookie.net/stealabr/images/9/9f/Rubrikiko.png/revision/latest/scale-to-width-down/200?cb=20260510142334",
-    "Venuspino": "https://static.wikia.nocookie.net/stealabr/images/0/0c/Venuspino.png/revision/latest/scale-to-width-down/200?cb=20260616235620",
-    "Bearito Cabinito": "https://static.wikia.nocookie.net/stealabr/images/6/6e/Bearito_Cabinito.png/revision/latest/scale-to-width-down/200?cb=20260616234921",
-    "Rosey and Teddy": "https://static.wikia.nocookie.net/stealabr/images/9/9b/Rosey_and_Teddy.png/revision/latest/scale-to-width-down/200?cb=20260208175726",
-    "Cerberus": "https://static.wikia.nocookie.net/stealabr/images/4/45/Cerberus.png/revision/latest/scale-to-width-down/195?cb=20260217181804",
-    "Hydra Bunny": "https://static.wikia.nocookie.net/stealabr/images/0/0b/Hydra_Bunny.png/revision/latest/scale-to-width-down/200?cb=20260626000309",
-    "Cooki and Milki": "https://static.wikia.nocookie.net/stealabr/images/9/96/Cooki_and_Milki.png/revision/latest/scale-to-width-down/200?cb=20260417153501",
-    "La Supreme Combinasion": "https://static.wikia.nocookie.net/stealabr/images/c/c8/La_Supreme_Combinasion.png/revision/latest/scale-to-width-down/135?cb=20250825130920",
-    "Capitano Moby": "https://static.wikia.nocookie.net/stealabr/images/b/be/Capitano_Moby.png/revision/latest/scale-to-width-down/200?cb=20260428162232",
-    "Popcuru and Fizzuru": "https://static.wikia.nocookie.net/stealabr/images/8/82/Popcuru_and_Fizzuru.png/revision/latest/scale-to-width-down/200?cb=20260425231747",
-    "Spooky and Pumpky": "https://static.wikia.nocookie.net/stealabr/images/d/d6/Spookypumpky.png/revision/latest/scale-to-width-down/200?cb=20251012023638",
-    "Ketupat Bros": "https://static.wikia.nocookie.net/stealabr/images/4/4d/Ketupat_Bros.png/revision/latest/scale-to-width-down/200?cb=20260207220106",
-    "Abyssaloco": "https://static.wikia.nocookie.net/stealabr/images/1/10/Abyssaloco.png/revision/latest/scale-to-width-down/200?cb=20260510004641",
-    "Avocadorilla": "https://static.wikia.nocookie.net/stealabr/images/8/85/Avocadorilla.png/revision/latest/scale-to-width-down/193?cb=20260708203602",
-    "Brutto Gialutto": "https://static.wikia.nocookie.net/stealabr/images/6/64/Brutto_Gialutto_New.png/revision/latest/scale-to-width-down/200?cb=20260327015458",
-    "Caylusaurus": "https://static.wikia.nocookie.net/stealabr/images/3/30/Caylusaurus.png/revision/latest/scale-to-width-down/200?cb=20260626000058",
-    "Ganganzelli Trulala": "https://static.wikia.nocookie.net/stealabr/images/b/b4/Ganganzelli_Trulala.png/revision/latest/scale-to-width-down/139?cb=20260709005214",
-    "Gorillo Subwoofero": "https://static.wikia.nocookie.net/stealabr/images/0/08/Dubstep_boy.png/revision/latest/scale-to-width-down/166?cb=20250909170929",
-    "Los Fruits": "https://static.wikia.nocookie.net/stealabr/images/d/dc/Los_Fruits.png/revision/latest/scale-to-width-down/200?cb=20260616235111",
-    "Pretzo Robo": "https://static.wikia.nocookie.net/stealabr/images/0/0d/Pretzo_Robo.png/revision/latest/scale-to-width-down/200?cb=20260419152740",
-    "Rhino Helicopterino": "https://static.wikia.nocookie.net/stealabr/images/1/10/Rhino_Helicopterino.png/revision/latest/scale-to-width-down/200?cb=20260322225518",
-    "Bacuru and Egguru": "https://static.wikia.nocookie.net/stealabr/images/b/b5/Bacuru_and_Egguru.png/revision/latest/scale-to-width-down/200?cb=20260417154056",
-    "Bananito": "https://static.wikia.nocookie.net/stealabr/images/7/7e/Bananito.png/revision/latest/scale-to-width-down/200?cb=20260417152109",
-    "Baskito": "https://static.wikia.nocookie.net/stealabr/images/e/e6/Baskito.png/revision/latest/scale-to-width-down/200?cb=20260625234705",
-    "Camera Ramena": "https://static.wikia.nocookie.net/stealabr/images/4/46/Camera_Ramena.png/revision/latest/scale-to-width-down/200?cb=20260419152435",
-    "John Doe": "https://static.wikia.nocookie.net/stealabr/images/3/33/John_Doe.png/revision/latest/scale-to-width-down/200?cb=20260425232401",
-    "Sushi Inu": "https://static.wikia.nocookie.net/stealabr/images/5/5b/Sushi_Inu.png/revision/latest/scale-to-width-down/200?cb=20260616235531",
-    "Boppin Bunny": "https://static.wikia.nocookie.net/stealabr/images/b/bc/Boppin_Bunny.png/revision/latest/scale-to-width-down/200?cb=20260405151129",
-    "Gym Bros": "https://static.wikia.nocookie.net/stealabr/images/b/b7/Gym_Bros.png/revision/latest/scale-to-width-down/200?cb=20260419152519",
-    "Fragrama and Chocrama": "https://static.wikia.nocookie.net/stealabr/images/5/56/Fragrama.png/revision/latest/scale-to-width-down/200?cb=20251109011733",
-    "Cigno Fulgoro": "https://static.wikia.nocookie.net/stealabr/images/f/f7/Cigno_Fulgoro.png/revision/latest/scale-to-width-down/200?cb=20260417152643",
-    "Money Money Puggy": "https://static.wikia.nocookie.net/stealabr/images/d/d6/Money_Money_Puggy.png/revision/latest/scale-to-width-down/177?cb=20260217180308",
-    "DJ Panda": "https://static.wikia.nocookie.net/stealabr/images/3/38/DJ_Panda.png/revision/latest/scale-to-width-down/134?cb=20260306024631",
-    "Tang Tang Keletang": "https://static.wikia.nocookie.net/stealabr/images/c/ce/TangTangVfx.png/revision/latest/scale-to-width-down/199?cb=20251014025849",
-    "Ketupat Kepat": "https://static.wikia.nocookie.net/stealabr/images/a/ac/KetupatKepat.png/revision/latest/scale-to-width-down/200?cb=20260324191002",
-    "Garama and Madundung": "https://static.wikia.nocookie.net/stealabr/images/1/12/Garama_and_Madundung.png/revision/latest/scale-to-width-down/200?cb=20260417153345",
-    "Money Money Bros": "https://static.wikia.nocookie.net/stealabr/images/e/e0/Money_Money_Bros.png/revision/latest/scale-to-width-down/200?cb=20260417153843",
-    "Celestial Pegasus": "https://static.wikia.nocookie.net/stealabr/images/b/b2/Celestial_Pegasus.png/revision/latest/scale-to-width-down/200?cb=20260417152449",
-    "La Secret Combinasion": "https://static.wikia.nocookie.net/stealabr/images/4/4f/La_Secret_Combinasion.png/revision/latest/scale-to-width-down/200?cb=20260419152549"
-}
+if not GUILD_ID:
+    print("❌ GUILD_ID not set in environment variables!")
+    exit(1)
 
-# ============================================================
-# TIER MAPPING
-# ============================================================
-TIER_COLORS = {
-    "og": 0xFFD700,
-    "peak": 0x7C3AED,
-    "ultralight": 0x7C3AED,
-    "high": 0x10B981,
-    "mid": 0xF59E0B,
-    "farmer": 0xFB923C,
-    "low": 0xEF4444,
-    "steal": 0xFF6B6B,
-    "rebirth": 0xF472B6
-}
+if not DEEPSEEK_API_KEY:
+    print("❌ DEEPSEEK_API_KEY not set in environment variables!")
+    exit(1)
 
-TIER_NAMES = {
-    "og": "★ OG LIGHTS",
-    "peak": "✦ PEAK",
-    "ultralight": "✦ ULTRALIGHT",
-    "high": "✦ HIGHLIGHT",
-    "mid": "✦ MIDLIGHT",
-    "farmer": "✦ FARMER LIGHT",
-    "low": "✦ LOWLIGHT",
-    "steal": "🎯 STEAL TRACKER",
-    "rebirth": "🔄 REBIRTHING"
-}
+# Security: Hide API keys from logs
+print("✅ Environment variables loaded successfully")
+print(f"🔒 Bot token: {'*' * 10} (hidden)")
+print(f"🔒 API key: {'*' * 10} (hidden)")
 
-def get_tier_key(tier_name):
-    tier_name = tier_name.upper().strip()
-    if tier_name in ["OG"]: return "og"
-    elif tier_name in ["PEAK", "ULTRALIGHT"]: return "peak"
-    elif tier_name in ["HIGH", "HIGHLIGHT"]: return "high"
-    elif tier_name in ["MID", "MIDLIGHT"]: return "mid"
-    elif tier_name in ["FARMER", "FARMER LIGHT"]: return "farmer"
-    elif tier_name in ["LOW", "LOWLIGHT"]: return "low"
-    elif tier_name == "STEAL": return "steal"
-    elif tier_name == "REBIRTH": return "rebirth"
-    return "default"
+# ─── STORAGE ──────────────────────────────────────────────────────────────────
+TICKETS_FILE = "tickets.json"
 
-def get_image_url(name):
-    return BRAINROT_IMAGES.get(name, None)
-
-def format_num(n):
-    if n >= 1e12: return f"{n/1e12:.1f}T"
-    if n >= 1e9: return f"{n/1e9:.1f}B"
-    if n >= 1e6: return f"{n/1e6:.1f}M"
-    if n >= 1e3: return f"{n/1e3:.1f}K"
-    return str(n)
-
-def parse_gen(gen_str):
+def load_tickets():
+    if not os.path.exists(TICKETS_FILE):
+        return {}
     try:
-        if isinstance(gen_str, (int, float)):
-            return int(gen_str)
-        s = str(gen_str).replace("/s", "").strip()
-        num = float(''.join(c for c in s if c.isdigit() or c == '.'))
-        if 'T' in s or 't' in s: return int(num * 1e12)
-        if 'B' in s or 'b' in s: return int(num * 1e9)
-        if 'M' in s or 'm' in s: return int(num * 1e6)
-        if 'K' in s or 'k' in s: return int(num * 1e3)
-        return int(num)
-    except:
-        return 0
-
-# ============================================================
-# STATE (Pause/Resume)
-# ============================================================
-PAUSED = False
-STATS_FILE = "stats.json"
-
-def load_stats():
-    try:
-        with open(STATS_FILE, "r") as f:
+        with open(TICKETS_FILE, 'r') as f:
             return json.load(f)
     except:
-        return {"logCount": 0, "totalGen": 0, "stealCount": 0, "lastBrainrot": "None", "lastTier": "None"}
+        return {}
 
-def save_stats(stats):
-    with open(STATS_FILE, "w") as f:
-        json.dump(stats, f)
+def save_tickets(data):
+    with open(TICKETS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
 
-stats = load_stats()
-
-# ============================================================
-# DISCORD BOT SETUP
-# ============================================================
+# ─── BOT SETUP ────────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+intents.guilds = True
+intents.members = True
+intents.guild_messages = True
 
-async def send_to_webhook(webhook_url, embed):
-    if not webhook_url:
-        return
-    async with aiohttp.ClientSession() as session:
-        webhook = Webhook.from_url(webhook_url, session=session)
-        await webhook.send(embed=embed, wait=True)
+bot = commands.Bot(command_prefix='?', intents=intents)
 
+# ─── PRICES ──────────────────────────────────────────────────────────────────
+prices = {
+    "robux": "800 Robux",
+    "ltc": "3 LTC",
+    "paypal": "$5 USD",
+    "brainrots": "3 Garamas Base OR 2 Traited OR 1 Coloured",
+    "gear": "2 Flying Gear OR 1 Flying Gear + Base Skins"
+}
+
+# ─── AI FUNCTIONS ─────────────────────────────────────────────────────────────
+async def get_ai_response(message, ticket_type=None, payment_method=None, history=None):
+    """Get response from DeepSeek AI - API key hidden from users"""
+    
+    system_prompt = f"""You are an AI support agent for a Discord server called "Source Hub". 
+You handle tickets for:
+1. Buying scripts
+2. Buying source access
+3. Partnerships
+4. General support
+
+PRICES (use these EXACTLY when asked):
+- Robux: {prices['robux']}
+- LTC: {prices['ltc']}
+- PayPal: {prices['paypal']}
+- Brainrots: {prices['brainrots']}
+- Gear: {prices['gear']}
+
+RULES:
+1. Be friendly and conversational
+2. Answer questions directly
+3. If you don't know something, say "I'll escalate this to a human agent"
+4. Keep responses helpful but concise
+5. If they say "human" or "staff", immediately offer to escalate
+6. Ask clarifying questions if needed
+7. Categorize the issue as: Script Purchase, Source Access, Partnership, or General
+8. NEVER mention your API key, token, or any internal credentials
+9. If asked about how you work, say "I'm an AI assistant powered by DeepSeek" - don't give technical details"""
+
+    if ticket_type:
+        system_prompt += f"\n\nThis is a {ticket_type} ticket."
+
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    if history:
+        messages.extend(history[-5:])
+    
+    messages.append({"role": "user", "content": message})
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": messages,
+                    "max_tokens": 300,
+                    "temperature": 0.7
+                },
+                timeout=30
+            ) as response:
+                data = await response.json()
+                return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "⚠️ I'm having trouble responding right now. A human agent will be with you shortly."
+
+# ─── TICKET MODAL ─────────────────────────────────────────────────────────────
+class TicketModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="🎫 Open Ticket")
+        
+        self.ticket_type = discord.ui.TextInput(
+            label="What do you need?",
+            placeholder="Buy Script / Buy Source Access / Partner / General",
+            style=discord.TextStyle.short,
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.ticket_type)
+        
+        self.payment_method = discord.ui.TextInput(
+            label="Payment Method (if buying)",
+            placeholder="Robux / LTC / PayPal / Brainrots / Gear",
+            style=discord.TextStyle.short,
+            required=False,
+            max_length=50
+        )
+        self.add_item(self.payment_method)
+        
+        self.details = discord.ui.TextInput(
+            label="More Details",
+            placeholder="Any additional information...",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=1000
+        )
+        self.add_item(self.details)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        tickets = load_tickets()
+        if str(interaction.user.id) in tickets:
+            await interaction.response.send_message(
+                f"❌ You already have an open ticket: <#{tickets[str(interaction.user.id)]}>",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        
+        guild = interaction.guild
+        
+        category = discord.utils.get(guild.categories, name="TICKETS")
+        if not category:
+            category = await guild.create_category("TICKETS")
+
+        channel_name = f"ticket-{interaction.user.name.lower().replace(' ', '-')}"
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+        }
+
+        channel = await guild.create_text_channel(
+            channel_name,
+            category=category,
+            overwrites=overwrites,
+            topic=f"User: {interaction.user.id} | Type: {self.ticket_type.value}"
+        )
+
+        tickets[str(interaction.user.id)] = str(channel.id)
+        save_tickets(tickets)
+
+        welcome_msg = f"Hey {interaction.user.mention}! 👋 I'm your AI support agent!"
+        
+        ticket_lower = self.ticket_type.value.lower()
+        if "buy" in ticket_lower or "script" in ticket_lower or "source" in ticket_lower:
+            welcome_msg += f"\n\nI see you're interested in {self.ticket_type.value}."
+            if self.payment_method.value:
+                pm = self.payment_method.value.lower()
+                welcome_msg += f" You mentioned paying with {self.payment_method.value}."
+                if pm in prices:
+                    welcome_msg += f"\n\n💳 The price for that is: **{prices[pm]}**"
+        elif "partner" in ticket_lower:
+            welcome_msg += f"\n\nGreat! Let's discuss partnership opportunities!"
+        else:
+            welcome_msg += f"\n\nHow can I help you today?"
+
+        welcome_msg += "\n\nAsk me anything, and I'll do my best to help! If you need a human, just say 'human' or 'staff'."
+
+        embed = discord.Embed(
+            title="🎫 Ticket Opened",
+            description=welcome_msg,
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Ticket Type", value=self.ticket_type.value, inline=True)
+        if self.payment_method.value:
+            embed.add_field(name="Payment Method", value=self.payment_method.value, inline=True)
+        if self.details.value:
+            embed.add_field(name="Details", value=self.details.value[:1024], inline=False)
+        embed.set_footer(text=f"User ID: {interaction.user.id}")
+        embed.timestamp = datetime.now()
+
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="🔒 Close", style=discord.ButtonStyle.danger, custom_id="close_ticket"))
+        view.add_item(discord.ui.Button(label="✋ Claim", style=discord.ButtonStyle.success, custom_id="claim_ticket"))
+        view.add_item(discord.ui.Button(label="📝 Transcript", style=discord.ButtonStyle.secondary, custom_id="transcript"))
+
+        await channel.send(content=interaction.user.mention, embed=embed, view=view)
+        
+        log_channel = discord.utils.get(guild.text_channels, name="ticket-logs")
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🎫 Ticket Created",
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+            log_embed.add_field(name="User", value=f"{interaction.user} ({interaction.user.id})", inline=True)
+            log_embed.add_field(name="Channel", value=f"#{channel.name}", inline=True)
+            log_embed.add_field(name="Type", value=self.ticket_type.value, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await interaction.followup.send(f"✅ Ticket created: {channel.mention}", ephemeral=True)
+
+# ─── BOT EVENTS ──────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    print(f"✅ Aurora Bot online: {bot.user}")
-    print(f"📡 Webhooks configured: {len([k for k,v in WEBHOOKS.items() if v])} channels")
-    print(f"🖼️ Loaded {len(BRAINROT_IMAGES)} brainrot images")
-    print(f"⏸ Paused: {PAUSED}")
-    print(f"📊 Stats: {stats}")
-
-# ============================================================
-# !PAUSE COMMAND
-# ============================================================
-@bot.command(name="pause")
-async def pause_logs(ctx):
-    global PAUSED
-    if PAUSED:
-        embed = discord.Embed(
-            title="⏸ Already Paused",
-            description="Logging is already paused.\nUse `!resume` to start logging again.",
-            color=0xF59E0B,
-            timestamp=datetime.now()
-        )
-        embed.set_footer(text=f"Total logs: {stats['logCount']}")
-        await ctx.send(embed=embed)
-        return
-    
-    PAUSED = True
-    
-    embed = discord.Embed(
-        title="⏸ Logging Paused",
-        description="All brainrot logs will now be ignored.\nUse `!resume` to start logging again.",
-        color=0xF59E0B,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="📊 Stats", value=f"Total Logs: {stats['logCount']}\nTotal Gen: ${format_num(stats['totalGen'])}/s", inline=False)
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !RESUME COMMAND
-# ============================================================
-@bot.command(name="resume")
-async def resume_logs(ctx):
-    global PAUSED
-    if not PAUSED:
-        embed = discord.Embed(
-            title="▶ Already Active",
-            description="Logging is already active.\nUse `!pause` to pause logging.",
-            color=0x10B981,
-            timestamp=datetime.now()
-        )
-        embed.set_footer(text=f"Total logs: {stats['logCount']}")
-        await ctx.send(embed=embed)
-        return
-    
-    PAUSED = False
-    
-    embed = discord.Embed(
-        title="▶ Logging Resumed",
-        description="Brainrot logs are now active.\nUse `!pause` to pause logging.",
-        color=0x10B981,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="📊 Stats", value=f"Total Logs: {stats['logCount']}\nTotal Gen: ${format_num(stats['totalGen'])}/s", inline=False)
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !SEND COMMAND
-# ============================================================
-@bot.command(name="send")
-async def send_log(ctx, *, json_data=None):
-    global PAUSED, stats
-    
-    if PAUSED:
-        embed = discord.Embed(
-            title="⏸ Logging Paused",
-            description="All logs are currently paused.\nUse `!resume` to start logging again.",
-            color=0xF59E0B,
-            timestamp=datetime.now()
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    if json_data is None:
-        await ctx.send("❌ No data provided. Example: `!send {\"name\":\"Skibidi Toilet\",\"gen\":\"450M/s\",\"tier\":\"OG\"}`")
-        return
-    
+    print(f"✅ Bot is ready! Logged in as {bot.user}")
+    print(f"📊 Guild ID: {GUILD_ID}")
     try:
-        data = json.loads(json_data)
-    except json.JSONDecodeError:
-        await ctx.send("❌ Invalid JSON format")
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print("✅ Commands synced!")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
+
+# ─── SLASH COMMANDS ──────────────────────────────────────────────────────────
+@bot.tree.command(name="panel", description="Send the ticket panel", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+async def panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎫 Source Hub Support",
+        description="Click the button below to open a ticket!\n\n"
+                   "**What we offer:**\n"
+                   "• 💰 Buy Scripts\n"
+                   "• 🔓 Source Access\n"
+                   "• 🤝 Partnerships\n"
+                   "• ❓ General Support",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="AI-powered support system")
+    
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="📩 Open Ticket", style=discord.ButtonStyle.primary, custom_id="open_ticket"))
+    
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="add", description="Add a user to this ticket", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(user="User to add")
+async def add_user(interaction: discord.Interaction, user: discord.Member):
+    if not is_ticket_channel(interaction.channel):
+        await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
         return
     
-    name = data.get("name", "Unknown")
-    gen = data.get("gen", "0")
-    tier_display = data.get("tier", "Unknown")
-    log_type = data.get("type", "brainrot")
-    items = data.get("items", [])
-    user = data.get("user", None)
-    priority = data.get("priority", None)
-    rebirth_num = data.get("rebirth", None)
-    
-    # Update stats
-    stats["logCount"] += 1
-    stats["lastBrainrot"] = name
-    stats["lastTier"] = tier_display
-    if log_type == "steal":
-        stats["stealCount"] += 1
-    else:
-        stats["totalGen"] += parse_gen(gen)
-    save_stats(stats)
-    
-    # Get tier key and webhook
-    tier_key = get_tier_key(tier_display)
-    webhook_url = WEBHOOKS.get(tier_key, WEBHOOKS.get("default"))
-    
-    image_url = get_image_url(name)
-    color = TIER_COLORS.get(tier_key, 0x5865F2)
-    tier_name = TIER_NAMES.get(tier_key, tier_display)
-    
-    # Build embed
-    embed = discord.Embed(
-        title=f"🔍 Aurora Finder • {tier_name}",
-        color=color,
-        timestamp=datetime.now()
-    )
-    
-    if log_type == "steal":
-        embed.title = f"🎯 {name} Stolen!"
-        embed.description = f"**{tier_name}**"
-        embed.add_field(name="💰 Generation", value=f"${gen}/s", inline=True)
-    elif log_type == "batch" and items:
-        list_text = ""
-        for item in items:
-            list_text += f"**{item['name']}** — ${item['gen']}/s\n"
-        embed.description = f"**Batch of {len(items)} Brainrots Found**"
-        embed.add_field(name="📋 Brainrots Found", value=list_text, inline=False)
-    elif log_type == "rebirth":
-        embed.title = "🔄 Rebirth Update"
-        embed.description = f"**{user}** is rebirthing!"
-        embed.color = 0xF472B6
-        if rebirth_num:
-            embed.add_field(name="🔄 Rebirth", value=f"#{rebirth_num}", inline=True)
-        if priority:
-            embed.add_field(name="🎯 Priority", value=priority, inline=True)
-        embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-        await send_to_webhook(webhook_url, embed)
+    await interaction.channel.set_permissions(user, view_channel=True, send_messages=True, read_message_history=True)
+    await interaction.response.send_message(f"✅ Added {user.mention} to this ticket.")
+
+@bot.tree.command(name="remove", description="Remove a user from this ticket", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(user="User to remove")
+async def remove_user(interaction: discord.Interaction, user: discord.Member):
+    if not is_ticket_channel(interaction.channel):
+        await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
         return
-    else:
-        embed.add_field(name="🧠 Brainrot", value=f"**{name}** — **${gen}/s**", inline=False)
     
-    if image_url:
-        embed.set_thumbnail(url=image_url)
+    await interaction.channel.set_permissions(user, view_channel=False)
+    await interaction.response.send_message(f"✅ Removed {user.mention} from this ticket.")
+
+@bot.tree.command(name="close", description="Close this ticket", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+async def close_ticket(interaction: discord.Interaction):
+    if not is_ticket_channel(interaction.channel):
+        await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+        return
     
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
+    await interaction.response.send_message("🔒 Closing ticket in 5 seconds...")
     
-    await send_to_webhook(webhook_url, embed)
-
-# ============================================================
-# !STATUS COMMAND
-# ============================================================
-@bot.command(name="status")
-async def status_cmd(ctx):
-    status = "⏸ Paused" if PAUSED else "▶ Active"
-    embed = discord.Embed(
-        title="📊 Aurora Status",
-        color=0x7C3AED,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="Status", value=status, inline=True)
-    embed.add_field(name="Total Brainrots", value=str(stats["logCount"]), inline=True)
-    embed.add_field(name="Total Generation", value=f"${format_num(stats['totalGen'])}/s", inline=True)
-    embed.add_field(name="Steals Detected", value=str(stats["stealCount"]), inline=True)
-    embed.add_field(name="Last Brainrot", value=f"{stats['lastBrainrot']} ({stats['lastTier']})", inline=True)
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !STATS COMMAND
-# ============================================================
-@bot.command(name="stats")
-async def stats_cmd(ctx):
-    status = "⏸ Paused" if PAUSED else "▶ Active"
-    embed = discord.Embed(
-        title="📈 Aurora Statistics",
-        color=0x7C3AED,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="Brainrots Found", value=str(stats["logCount"]), inline=True)
-    embed.add_field(name="Total Generation", value=f"${format_num(stats['totalGen'])}/s", inline=True)
-    embed.add_field(name="Steals Detected", value=str(stats["stealCount"]), inline=True)
-    embed.add_field(name="Last Found", value=stats["lastBrainrot"], inline=True)
-    embed.add_field(name="Tier", value=stats["lastTier"], inline=True)
-    embed.add_field(name="Status", value=status, inline=True)
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !CLEARLOGS COMMAND
-# ============================================================
-@bot.command(name="clearlogs")
-async def clear_logs(ctx):
-    global stats
-    stats["logCount"] = 0
-    stats["totalGen"] = 0
-    stats["stealCount"] = 0
-    stats["lastBrainrot"] = "None"
-    stats["lastTier"] = "None"
-    save_stats(stats)
-    embed = discord.Embed(
-        title="🗑 Logs Cleared",
-        description="All statistics have been reset.",
-        color=0xEF4444,
-        timestamp=datetime.now()
-    )
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !RESET COMMAND
-# ============================================================
-@bot.command(name="reset")
-async def reset_bot(ctx):
-    global stats, PAUSED
-    stats["logCount"] = 0
-    stats["totalGen"] = 0
-    stats["stealCount"] = 0
-    stats["lastBrainrot"] = "None"
-    stats["lastTier"] = "None"
-    PAUSED = False
-    save_stats(stats)
-    embed = discord.Embed(
-        title="🔄 Aurora Reset",
-        description="Everything has been reset to default.\nLogging is now **active**.",
-        color=0x7C3AED,
-        timestamp=datetime.now()
-    )
-    embed.set_footer(text="Aurora Finder • discord.gg/gf22vrzQ7")
-    await ctx.send(embed=embed)
-
-# ============================================================
-# !TEST COMMAND
-# ============================================================
-@bot.command(name="test")
-async def test_webhooks(ctx):
-    await ctx.send("📡 Testing all webhook channels...")
+    tickets = load_tickets()
+    user_id = None
+    for uid, ch_id in tickets.items():
+        if ch_id == str(interaction.channel.id):
+            user_id = uid
+            break
     
-    for tier_key, webhook_url in WEBHOOKS.items():
-        if webhook_url and tier_key != "default":
+    if user_id:
+        try:
+            user = await bot.fetch_user(int(user_id))
+            await user.send("📩 Your ticket has been closed. Thanks for contacting us!")
+        except:
+            pass
+    
+    await asyncio.sleep(5)
+    
+    if user_id:
+        tickets = load_tickets()
+        del tickets[user_id]
+        save_tickets(tickets)
+    
+    await interaction.channel.delete()
+
+@bot.tree.command(name="claim", description="Claim this ticket", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+async def claim_ticket(interaction: discord.Interaction):
+    if not is_ticket_channel(interaction.channel):
+        await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        description=f"✅ This ticket has been claimed by {interaction.user.mention}",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="transcript", description="Get ticket transcript", guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(administrator=True)
+async def transcript(interaction: discord.Interaction):
+    if not is_ticket_channel(interaction.channel):
+        await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+        return
+    
+    await interaction.response.defer()
+    transcript_text = await get_transcript(interaction.channel)
+    
+    filename = f"transcript-{interaction.channel.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+    with open(filename, 'w') as f:
+        f.write(transcript_text)
+    
+    await interaction.followup.send(file=discord.File(filename))
+    os.remove(filename)
+
+# ─── PREFIX COMMANDS ──────────────────────────────────────────────────────────
+@bot.command(name='lock')
+@commands.has_permissions(administrator=True)
+async def lock_channel(ctx):
+    """Lock the current channel"""
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send(f"🔒 Channel locked by {ctx.author.mention}")
+
+@bot.command(name='unlock')
+@commands.has_permissions(administrator=True)
+async def unlock_channel(ctx):
+    """Unlock the current channel"""
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=None)
+    await ctx.send(f"🔓 Channel unlocked by {ctx.author.mention}")
+
+@bot.command(name='lockdown')
+@commands.has_permissions(administrator=True)
+async def lockdown_server(ctx):
+    """Lock down the entire server"""
+    for channel in ctx.guild.channels:
+        if isinstance(channel, discord.TextChannel):
             try:
-                embed = discord.Embed(
-                    title=f"🧪 Test: {tier_key.upper()}",
-                    description=f"This is a test message for {TIER_NAMES.get(tier_key, tier_key)}",
-                    color=TIER_COLORS.get(tier_key, 0x5865F2),
-                    timestamp=datetime.now()
-                )
-                embed.set_footer(text="Aurora Finder • Test")
-                await send_to_webhook(webhook_url, embed)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                await ctx.send(f"❌ Failed to send to {tier_key}: {e}")
-    
-    await ctx.send("✅ Test complete!")
+                await channel.set_permissions(ctx.guild.default_role, send_messages=False)
+            except:
+                pass
+    await ctx.send(f"🔒 **SERVER LOCKDOWN** initiated by {ctx.author.mention}")
 
-# ============================================================
-# RUN BOT
-# ============================================================
+@bot.command(name='unlockdown')
+@commands.has_permissions(administrator=True)
+async def unlockdown_server(ctx):
+    """Unlock the entire server"""
+    for channel in ctx.guild.channels:
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.set_permissions(ctx.guild.default_role, send_messages=None)
+            except:
+                pass
+    await ctx.send(f"🔓 **SERVER UNLOCKED** by {ctx.author.mention}")
+
+@bot.command(name='to')
+@commands.has_permissions(administrator=True)
+async def timeout_user(ctx, member: discord.Member, duration: str, *, reason: str = "No reason provided"):
+    """Timeout a user. Usage: ?to @user 28d reason"""
+    duration_map = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
+    
+    unit = duration[-1]
+    amount = int(duration[:-1])
+    
+    if unit not in duration_map:
+        await ctx.send("❌ Invalid duration format. Use: s, m, h, d, w")
+        return
+    
+    seconds = amount * duration_map[unit]
+    if seconds > 2419200:
+        await ctx.send("❌ Maximum timeout is 28 days")
+        return
+    
+    await member.timeout(timedelta(seconds=seconds), reason=reason)
+    await ctx.send(f"✅ {member.mention} timed out for **{duration}**. Reason: {reason}")
+
+@bot.command(name='unto')
+@commands.has_permissions(administrator=True)
+async def untimeout_user(ctx, member: discord.Member):
+    """Remove timeout from a user"""
+    await member.timeout(None)
+    await ctx.send(f"✅ {member.mention} has been un-timed out")
+
+@bot.command(name='kick')
+@commands.has_permissions(administrator=True)
+async def kick_user(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    """Kick a user"""
+    await member.kick(reason=reason)
+    await ctx.send(f"✅ {member.mention} kicked. Reason: {reason}")
+
+@bot.command(name='ban')
+@commands.has_permissions(administrator=True)
+async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    """Ban a user"""
+    await member.ban(reason=reason)
+    await ctx.send(f"✅ {member.mention} banned. Reason: {reason}")
+
+@bot.command(name='clear')
+@commands.has_permissions(administrator=True)
+async def clear_messages(ctx, amount: int):
+    """Clear messages in the channel"""
+    if amount > 100:
+        await ctx.send("❌ Cannot clear more than 100 messages at once")
+        return
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"✅ Deleted {len(deleted) - 1} messages", delete_after=5)
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+def is_ticket_channel(channel):
+    """Check if a channel is a ticket"""
+    tickets = load_tickets()
+    return str(channel.id) in tickets.values()
+
+async def get_transcript(channel):
+    """Generate a transcript of the channel"""
+    messages = []
+    async for msg in channel.history(limit=200, oldest_first=True):
+        timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        author = f"{msg.author.name}#{msg.author.discriminator} ({msg.author.id})"
+        content = msg.content or "[No text]"
+        messages.append(f"[{timestamp}] {author}: {content}")
+    
+    transcript = f"Transcript of #{channel.name}\n"
+    transcript += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    transcript += "=" * 50 + "\n\n"
+    transcript += "\n".join(messages)
+    return transcript
+
+# ─── MESSAGE HANDLER ──────────────────────────────────────────────────────────
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    
+    if is_ticket_channel(message.channel):
+        if message.content.startswith('?'):
+            await bot.process_commands(message)
+            return
+        
+        # Get AI response
+        async with message.channel.typing():
+            response = await get_ai_response(
+                message.content,
+                ticket_type="General",
+                history=[{"role": "user", "content": msg.content} for msg in await message.channel.history(limit=10).flatten() if not msg.author.bot]
+            )
+        
+        await message.channel.send(response)
+        return
+    
+    await bot.process_commands(message)
+
+# ─── BUTTON HANDLERS ──────────────────────────────────────────────────────────
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.component:
+        custom_id = interaction.data.get('custom_id')
+        
+        if custom_id == "open_ticket":
+            await interaction.response.send_modal(TicketModal())
+        
+        elif custom_id == "close_ticket":
+            if not is_ticket_channel(interaction.channel):
+                await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+                return
+            
+            await interaction.response.send_message("🔒 Closing ticket in 5 seconds...")
+            await asyncio.sleep(5)
+            
+            tickets = load_tickets()
+            user_id = None
+            for uid, ch_id in tickets.items():
+                if ch_id == str(interaction.channel.id):
+                    user_id = uid
+                    break
+            
+            if user_id:
+                try:
+                    user = await bot.fetch_user(int(user_id))
+                    await user.send("📩 Your ticket has been closed. Thanks for contacting us!")
+                except:
+                    pass
+                
+                tickets = load_tickets()
+                del tickets[user_id]
+                save_tickets(tickets)
+            
+            await interaction.channel.delete()
+        
+        elif custom_id == "claim_ticket":
+            if not is_ticket_channel(interaction.channel):
+                await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+                return
+            
+            embed = discord.Embed(
+                description=f"✅ Ticket claimed by {interaction.user.mention}",
+                color=discord.Color.green()
+            )
+            await interaction.response.send_message(embed=embed)
+        
+        elif custom_id == "transcript":
+            if not is_ticket_channel(interaction.channel):
+                await interaction.response.send_message("❌ This isn't a ticket channel!", ephemeral=True)
+                return
+            
+            await interaction.response.defer()
+            transcript_text = await get_transcript(interaction.channel)
+            
+            filename = f"transcript-{interaction.channel.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            with open(filename, 'w') as f:
+                f.write(transcript_text)
+            
+            await interaction.followup.send(file=discord.File(filename))
+            os.remove(filename)
+
+# ─── RUN BOT ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    if not TOKEN:
-        print("❌ DISCORD_TOKEN environment variable not set!")
-        exit(1)
-    bot.run(TOKEN)
+    print("🚀 Starting bot...")
+    bot.run(DISCORD_TOKEN)
